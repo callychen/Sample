@@ -1,0 +1,6 @@
+part_id,name,type,stock
+1000100,Computer,Standard,50
+1000101,Computer,Standard,50
+1000200,Camera,Standard,30
+1000300,Cord,Non-Standard,20
+1000400,Case,Non-Standard,100

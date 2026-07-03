@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Enterprise BOM Explorer with Supplier Sidebar</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 30px; background-color: #f8f9fa; color: #333; }
+        h2 { color: #007acc; margin-bottom: 5px; }
+        p.subtitle { color: #666; margin-top: 0; margin-bottom: 25px; }
+        
+        .dashboard-controls { 
+            display: flex; gap: 20px; background: white; padding: 20px; 
+            border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+            margin-bottom: 25px; align-items: center;
+        }
+        .control-group { display: flex; flex-direction: column; gap: 5px; }
+        select, input[type="date"] { padding: 8px 12px; font-size: 15px; border-radius: 4px; border: 1px solid #ccc; min-width: 200px; }
+
+        /* Split Layout Container */
+        .workspace-layout { display: flex; gap: 25px; position: relative; }
+        
+        /* Main Table Style */
+        .table-container { flex: 1; background: white; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.05); overflow: hidden; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 12px 15px; text-align: left; border-bottom: 1px solid #ddd; }
+        th { background-color: #007acc; color: white; font-weight: bold; }
+        tr:hover { background-color: #f1f5f9; }
+
+        /* Interactive Sidebar Style */
+        .supplier-sidebar { 
+            width: 380px; background: white; border-radius: 8px; 
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1); padding: 20px; 
+            display: none; border-top: 4px solid #007acc; align-self: flex-start;
+            position: sticky; top: 20px;
+        }
+        .sidebar-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #eee; padding-bottom: 10px; margin-bottom: 15px; }
+        .sidebar-close-btn { background: none; border: none; font-size: 20px; cursor: pointer; color: #999; }
+        .sidebar-close-btn:hover { color: #333; }
+        
+        .vendor-card { background: #f8f9fa; border: 1px solid #e2e8f0; border-radius: 6px; padding: 12px; margin-bottom: 12px; }
+        .vendor-title { font-weight: bold; color: #007acc; margin-bottom: 4px; }
+        
+        /* Interactive Buttons */
+        .view-suppliers-btn { background-color: #007acc; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 13px; }
+        .view-suppliers-btn:hover { background-color: #005999; }
+        .preferred-badge { font-size: 11px; background-color: #e8f5e9; color: #2e7d32; padding: 2px 6px; border-radius: 4px; font-weight: bold; float: right; }
+        .loading { font-style: italic; color: #999; text-align: center; padding: 20px; }
+    </style>
+</head>
+<body>
+
+    <h2>Enterprise BOM Management Matrix</h2>
+    <p class="subtitle">Select a product and view real-time components with dynamic supplier side-drawers</p>
+    
+    <div class="dashboard-controls">
+        <div class="control-group">
+            <label for="product-select"><strong>Select Target Product:</strong></label>
+            <select id="product-select">
+                <option value="">-- Loading Products... --</option>
+            </select>
+        </div>
+        <div class="control-group">
+            <label for="effectivity-date"><strong>Target Effectivity Date:</strong></label>
+            <input type="date" id="effectivity-date">
+        </div>
+    </div>
+
+    <div class="workspace-layout">
+        
+        <div class="table-container">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Part ID</th>
+                        <th>Part Name</th>
+                        <th>Type</th>
+                        <th>Qty Required</th>
+                        <th>Current Stock</th>
+                        <th>Procurement Action</th>
+                    </tr>
+                </thead>
+                <tbody id="bom-table-body">
+                    <tr><td colspan="6" class="loading">Configure filters above to construct build requirements.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="supplier-sidebar" id="supplier-drawer">
+            <div class="sidebar-header">
+                <div>
+                    <h3 style="margin:0; font-size: 18px;" id="sidebar-part-name">Part Suppliers</h3>
+                    <span style="font-size: 12px; color: #666;" id="sidebar-part-id">ID: --</span>
+                </div>
+                <button class="sidebar-close-btn" onclick="closeSidebar()">&times;</button>
+            </div>
+            <div id="sidebar-content">
+                </div>
+        </div>
+
+    </div>
+
+    <script>
+        let productsArray = [];
+        let bomsList = [];
+        let partsMap = {};
+        let suppliersMap = {};
+        let partSuppliersList = [];
+
+        function parseCSV(text) {
+            const lines = text.split('\n').map(line => line.trim()).filter(line => line !== '');
+            if (lines.length === 0) return [];
+            const headers = lines[0].split(',').map(h => h.trim());
+            return lines.slice(1).map(line => {
+                const values = line.split(',').map(v => v.trim());
+                let obj = {};
+                headers.forEach((header, i) => { obj[header] = values[i] || ''; });
+                return obj;
+            });
+        }
+
+        window.addEventListener('DOMContentLoaded', () => {
+            const today = new Date().toISOString().split('T')[0];
+            document.getElementById('effectivity-date').value = today;
+
+            Promise.all([
+                fetch('Product.csv').then(res => res.text()),
+                fetch('BOM.csv').then(res => res.text()),
+                fetch('Part.csv').then(res => res.text()),
+                fetch('Supplier.csv').then(res => res.text()),
+                fetch('Part_Supplier.csv').then(res => res.text())
+            ])
+            .then(([prodText, bomText, partText, suppText, bridgeText]) => {
+                productsArray = parseCSV(prodText);
+                bomsList = parseCSV(bomText);
+                const rawParts = parseCSV(partText);
+                const rawSuppliers = parseCSV(suppText);
+                partSuppliersList = parseCSV(bridgeText);
+
+                rawParts.forEach(p => partsMap[p.part_id] = p);
+                rawSuppliers.forEach(s => suppliersMap[s.supplier_id] = s);
+
+                initializeInterface();
+            });
+        });
+
+        function initializeInterface() {
+            const prodDropdown = document.getElementById('product-select');
+            prodDropdown.innerHTML = '<option value="">-- Choose Finished Product --</option>';
+            productsArray.forEach(prod => {
+                prodDropdown.innerHTML += `<option value="${prod.product_id}">${prod.product_id} - ${prod.name}</option>`;
+            });
+            prodDropdown.addEventListener('change', () => { closeSidebar(); calculateBOMSnapshot(); });
+            document.getElementById('effectivity-date').addEventListener('change', () => { closeSidebar(); calculateBOMSnapshot(); });
+        }
+
+        function calculateBOMSnapshot() {
+            const targetProductId = document.getElementById('product-select').value;
+            const targetDateStr = document.getElementById('effectivity-date').value;
+            const tbody = document.getElementById('bom-table-body');
+
+            if (!targetProductId || !targetDateStr) {
+                tbody.innerHTML = '<tr><td colspan="6" class="loading">Configure filters above to construct build requirements.</td></tr>';
+                return;
+            }
+
+            const targetTime = new Date(targetDateStr).getTime();
+            const activeBOMEntries = bomsList.filter(entry => {
+                if (entry.product_id !== targetProductId) return false;
+                const validFromTime = new Date(entry.effective_from).getTime();
+                const validToTime = entry.effective_to ? new Date(entry.effective_to).getTime() : new Date('9999-12-31').getTime();
+                return targetTime >= validFromTime && targetTime <= validToTime;
+            });
+
+            if (activeBOMEntries.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; padding:20px;">No operational components found.</td></tr>';
+                return;
+            }
+
+            let html = '';
+            activeBOMEntries.forEach(bomLine => {
+                const partInfo = partsMap[bomLine.part_id] || { name: 'Unknown Asset', type: 'Unclassified', stock: '0' };
+                const supplierCount = partSuppliersList.filter(link => link.part_id === bomLine.part_id).length;
+
+                // Create a button action if suppliers exist
+                const actionButton = supplierCount > 0 
+                    ? `<button class="view-suppliers-btn" onclick="openSidebar('${bomLine.part_id}')">Show Suppliers (${supplierCount})</button>`
+                    : `<span style="color:#999; font-style:italic; font-size:13px;">No Suppliers</span>`;
+
+                html += `
+                    <tr>
+                        <td><strong>${bomLine.part_id}</strong></td>
+                        <td>${partInfo.name}</td>
+                        <td>${partInfo.type}</td>
+                        <td>${bomLine.quantity}</td>
+                        <td>${partInfo.stock}</td>
+                        <td>${actionButton}</td>
+                    </tr>
+                `;
+            });
+            tbody.innerHTML = html;
+        }
+
+        // Sidebar Pop-out Query Engine
+        function openSidebar(partId) {
+            const drawer = document.getElementById('supplier-drawer');
+            const partInfo = partsMap[partId] || { name: 'Unknown Part' };
+            
+            document.getElementById('sidebar-part-name').textContent = partInfo.name;
+            document.getElementById('sidebar-part-id').textContent = `Part ID: ${partId}`;
+
+            // Filter supply network links for this target item
+            const vendors = partSuppliersList.filter(link => link.part_id === partId);
+            
+            // Sort suppliers so Rank 1/Preferred sits naturally at the top of the pane
+            vendors.sort((a, b) => a.preferred_order - b.preferred_order);
+
+            let sidebarHTML = '';
+            vendors.forEach(v => {
+                const vendorDetails = suppliersMap[v.supplier_id] || { supplier_name: 'Unknown Supplier', contact_email: 'N/A', lead_time: 'N/A' };
+                const badge = v.preferred_order === '1' ? `<span class="preferred-badge">Primary</span>` : '';
+
+                sidebarHTML += `
+                    <div class="vendor-card">
+                        <div class="vendor-title">${badge}${vendorDetails.supplier_name}</div>
+                        <div style="font-size: 13px; margin-top:5px; color:#555;">
+                            <strong>Price:</strong> $${v.price}<br>
+                            <strong>Lead Time:</strong> ${vendorDetails.lead_time} days<br>
+                            <strong>Contact:</strong> <a href="mailto:${vendorDetails.contact_email}" style="color:#007acc;">${vendorDetails.contact_email}</a><br>
+                            <span style="color:#888; font-size:11px;">System Rank Priority: ${v.preferred_order}</span>
+                        </div>
+                    </div>
+                `;
+            });
+
+            document.getElementById('sidebar-content').innerHTML = sidebarHTML;
+            drawer.style.display = 'block'; // Make the container visible
+        }
+
+        function closeSidebar() {
+            document.getElementById('supplier-drawer').style.display = 'none';
+        }
+    </script>
+</body>
+</html>
