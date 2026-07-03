@@ -5,15 +5,21 @@ let partsMap = {};
 let suppliersMap = {};
 let partSuppliersList = [];
 
-// Universal CSV Parsing Engine
+// Universal CSV Parsing Engine (Upgraded to handle hidden characters safely)
 function parseCSV(text) {
-    const lines = text.split('\n').map(line => line.trim()).filter(line => line !== '');
+    // This line scrubs out hidden Byte Order Marks if Excel added them
+    const cleanText = text.replace(/^\uFEFF/, ''); 
+    
+    const lines = cleanText.split('\n').map(line => line.trim()).filter(line => line !== '');
     if (lines.length === 0) return [];
+    
     const headers = lines[0].split(',').map(h => h.trim());
     return lines.slice(1).map(line => {
         const values = line.split(',').map(v => v.trim());
         let obj = {};
-        headers.forEach((header, i) => { obj[header] = values[i] || ''; });
+        headers.forEach((header, i) => { 
+            obj[header] = values[i] || ''; 
+        });
         return obj;
     });
 }
